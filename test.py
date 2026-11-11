@@ -1,7 +1,7 @@
 import requests
 
 # Alamat lokal API Anda (sesuaikan port jika berbeda)
-url = 'http://127.0.0.1:5000/predict'
+url = 'https://bdv-estimation-app.vercel.app/predict'
 
 # Data dummy yang dikirim (seolah-olah dari AppSheet)
 data_kirim = {
