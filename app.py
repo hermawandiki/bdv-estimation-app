@@ -2,25 +2,22 @@ import os
 import pickle
 
 import pandas as pd
-from flask import Flask, jsonify, request
+from flask import Flask, render_template_string, request
 
 app = Flask(__name__)
 
-# 1. Load model saat server pertama kali menyala
-#    (pakai path absolut supaya aman di lingkungan Vercel)
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 with open(os.path.join(BASE_DIR, "svr-model.pkl"), "rb") as f:
     model_bundle = pickle.load(f)
 best_estimator = model_bundle["model"]
 
 
-# 2. Halaman web UI
 HTML_PAGE = """<!DOCTYPE html>
 <html lang="id">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Prediksi BDV</title>
+<title>BDV Prediction</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@500&display=swap" rel="stylesheet">
@@ -69,24 +66,9 @@ HTML_PAGE = """<!DOCTYPE html>
     border-radius: 6px;
     padding: 28px;
   }
-  h1 {
-    margin: 0 0 4px;
-    font-size: 1.35rem;
-    font-weight: 600;
-    letter-spacing: -0.01em;
-  }
-  .sub {
-    margin: 0 0 24px;
-    color: var(--muted);
-    font-size: 0.92rem;
-    line-height: 1.5;
-  }
-  label {
-    display: block;
-    font-size: 0.9rem;
-    font-weight: 500;
-    margin-bottom: 6px;
-  }
+  h1 { margin: 0 0 4px; font-size: 1.35rem; font-weight: 600; letter-spacing: -0.01em; }
+  .sub { margin: 0 0 24px; color: var(--muted); font-size: 0.92rem; line-height: 1.5; }
+  label { display: block; font-size: 0.9rem; font-weight: 500; margin-bottom: 6px; }
   .field { margin-bottom: 16px; }
   .input-wrap { position: relative; }
   input {
@@ -100,165 +82,96 @@ HTML_PAGE = """<!DOCTYPE html>
     padding: 11px 52px 11px 12px;
   }
   .unit {
-    position: absolute;
-    right: 12px;
-    top: 50%;
+    position: absolute; right: 12px; top: 50%;
     transform: translateY(-50%);
-    color: var(--muted);
-    font-size: 0.85rem;
-    pointer-events: none;
+    color: var(--muted); font-size: 0.85rem; pointer-events: none;
   }
-  input:focus-visible, button:focus-visible {
-    outline: 3px solid var(--accent);
-    outline-offset: 2px;
-  }
+  input:focus-visible, button:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
   button {
-    width: 100%;
-    font: inherit;
-    font-weight: 600;
-    color: #fff;
-    background: var(--accent);
-    border: 0;
-    border-radius: 4px;
-    padding: 12px;
-    cursor: pointer;
-    margin-top: 4px;
+    width: 100%; font: inherit; font-weight: 600;
+    color: #fff; background: var(--accent);
+    border: 0; border-radius: 4px; padding: 12px; cursor: pointer; margin-top: 4px;
   }
   @media (prefers-color-scheme: dark) { button { color: #0a1117; } }
-  button:disabled { opacity: 0.6; cursor: progress; }
-  .meter {
-    margin-top: 24px;
-    background: var(--meter-bg);
-    border-radius: 4px;
-    padding: 16px 18px 14px;
-  }
-  .meter label { color: #9fb0ba; margin-bottom: 2px; }
+  .msg { min-height: 1.3em; margin: 10px 0 0; font-size: 0.88rem; color: var(--error); }
+  .meter { margin-top: 24px; background: var(--meter-bg); border-radius: 4px; padding: 16px 18px 14px; }
+  .meter .cap { display: block; font-size: 0.9rem; font-weight: 500; color: #9fb0ba; margin-bottom: 2px; }
   .reading {
-    display: flex;
-    align-items: baseline;
-    gap: 10px;
+    display: flex; align-items: baseline; gap: 10px;
     color: var(--meter-ink);
-    font-family: "IBM Plex Mono", ui-monospace, Consolas, monospace;
-    font-weight: 500;
+    font-family: "IBM Plex Mono", ui-monospace, Consolas, monospace; font-weight: 500;
   }
   #bdv { font-size: 2.6rem; line-height: 1.15; }
   .reading .u { font-size: 1rem; color: #9fb0ba; }
-  .msg {
-    min-height: 1.3em;
-    margin: 10px 0 0;
-    font-size: 0.88rem;
-    color: var(--error);
-  }
 </style>
 </head>
 <body>
 <main>
-  <h1>Prediksi BDV</h1>
-  <p class="sub">Masukkan temperature dan moisture, lalu hitung nilai BDV.</p>
+  <h1>Breakdown Voltage (BDV) Prediction</h1>
+  <p class="sub">Enter temperature and moisture, then calculate the BDV value.</p>
 
-  <form id="form" novalidate>
+  <form method="post" action="/">
     <div class="field">
       <label for="temperature">Temperature</label>
       <div class="input-wrap">
-        <input id="temperature" name="temperature" type="number" step="any" inputmode="decimal" required>
+        <input id="temperature" name="temperature" type="number" step="any"
+               inputmode="decimal" value="{{ temperature }}" required>
         <span class="unit">&deg;C</span>
       </div>
     </div>
     <div class="field">
       <label for="moisture">Moisture</label>
       <div class="input-wrap">
-        <input id="moisture" name="moisture" type="number" step="any" inputmode="decimal" required>
+        <input id="moisture" name="moisture" type="number" step="any"
+               inputmode="decimal" value="{{ moisture }}" required>
         <span class="unit">ppm</span>
       </div>
     </div>
-    <button id="btn" type="submit">Hitung BDV</button>
+    <button type="submit">Calculate BDV</button>
   </form>
 
-  <p id="msg" class="msg" role="alert"></p>
+  <p class="msg" role="alert">{{ error }}</p>
 
   <div class="meter">
-    <label for="bdv">BDV</label>
+    <span class="cap">BDV</span>
     <div class="reading">
-      <output id="bdv" aria-live="polite">&ndash;</output>
+      <output id="bdv">{{ bdv if bdv else "&ndash;"|safe }}</output>
       <span class="u">kV</span>
     </div>
   </div>
 </main>
-
-<script>
-  const form = document.getElementById("form");
-  const btn = document.getElementById("btn");
-  const bdv = document.getElementById("bdv");
-  const msg = document.getElementById("msg");
-
-  form.addEventListener("submit", async (e) => {
-    e.preventDefault();
-    msg.textContent = "";
-
-    const temperature = form.temperature.value.trim();
-    const moisture = form.moisture.value.trim();
-    if (temperature === "" || moisture === "") {
-      msg.textContent = "Isi temperature dan moisture terlebih dahulu.";
-      return;
-    }
-
-    btn.disabled = true;
-    btn.textContent = "Menghitung...";
-    try {
-      const res = await fetch("/predict", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ temperature: temperature, moisture: moisture })
-      });
-      const data = await res.json();
-      if (res.ok && data.status === "success") {
-        bdv.textContent = Number(data.bdv).toFixed(2);
-      } else {
-        bdv.textContent = "\u2013";
-        msg.textContent = data.message || "Prediksi gagal. Periksa input Anda.";
-      }
-    } catch (err) {
-      bdv.textContent = "\u2013";
-      msg.textContent = "Tidak dapat terhubung ke server. Coba lagi.";
-    } finally {
-      btn.disabled = false;
-      btn.textContent = "Hitung BDV";
-    }
-  });
-</script>
 </body>
 </html>
 """
 
 
-@app.route("/")
+@app.route("/", methods=["GET", "POST"])
 def index():
-    return HTML_PAGE
+    temperature = "31.0"
+    moisture = "100.0"
+    bdv = "50.0"
+    error = ""
 
+    if request.method == "POST":
+        temperature = request.form.get("temperature", "").strip()
+        moisture = request.form.get("moisture", "").strip()
+        try:
+            temp = float(temperature)
+            moist = float(moisture)
 
-# 3. Endpoint API (tetap sama, bisa dipakai AppSheet maupun web UI)
-@app.route("/predict", methods=["POST"])
-def predict():
-    try:
-        data = request.get_json()
+            df_input = pd.DataFrame(
+                [[temp, moist, temp * moist]],
+                columns=["temp", "moisture", "interaction"],
+            )
+            bdv = f"{float(best_estimator.predict(df_input)[0]):.2f}"
+        except ValueError:
+            error = "Temperature and moisture must be numbers."
+        except Exception as e:
+            error = f"Prediction failed: {e}"
 
-        temp = float(data["temperature"])
-        moisture = float(data["moisture"])
-
-        interaction = temp * moisture
-
-        df_input = pd.DataFrame(
-            [[temp, moisture, interaction]],
-            columns=["temp", "moisture", "interaction"],
-        )
-
-        hasil_prediksi = best_estimator.predict(df_input)[0]
-
-        return jsonify({"status": "success", "bdv": float(hasil_prediksi)}), 200
-
-    except Exception as e:
-        return jsonify({"status": "error", "message": str(e)}), 400
-
+    return render_template_string(
+        HTML_PAGE, temperature=temperature, moisture=moisture, bdv=bdv, error=error
+    )
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5000)
