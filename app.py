@@ -147,9 +147,9 @@ HTML_PAGE = """<!DOCTYPE html>
 
 @app.route("/", methods=["GET", "POST"])
 def index():
-    temperature = "31.0"
-    moisture = "100.0"
-    bdv = "50.0"
+    temperature = ""
+    moisture = ""
+    bdv = ""
     error = ""
 
     if request.method == "POST":
