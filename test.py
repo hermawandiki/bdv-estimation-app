@@ -1,16 +1,20 @@
-import requests
+import os
+import pickle
+import pandas as pd
 
-# Alamat lokal API Anda (sesuaikan port jika berbeda)
-url = 'https://bdv-estimation-app.vercel.app/predict'
+temp, moisture = 32.0, 123.0
 
-# Data dummy yang dikirim (seolah-olah dari AppSheet)
-data_kirim = {
-    "temperature": 31.9,
-    "moisture": 363
-}
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+with open(os.path.join(BASE_DIR, "model.pkl"), "rb") as f:
+    bundle = pickle.load(f)
 
-print("Mengirim data ke API...")
-response = requests.post(url, json=data_kirim)
+model = bundle["model"] if isinstance(bundle, dict) else bundle
 
-print("Status Code:", response.status_code)
-print("Balasan dari API:", response.json())
+print("Model :", type(model).__name__)
+print("Fitur :", getattr(model, "feature_names_in_", model.n_features_in_))
+
+data = {"temp": temp, "moisture": moisture, "interaction": temp * moisture}
+cols = list(model.feature_names_in_)
+X = pd.DataFrame([[data[c] for c in cols]], columns=cols)
+
+print("BDV   :", round(float(model.predict(X)[0]), 2))
