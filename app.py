@@ -7,8 +7,14 @@ from flask import Flask, render_template_string, request
 app = Flask(__name__)
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-with open(os.path.join(BASE_DIR, "model.pkl"), "rb") as f:
-    bundle = pickle.load(f)
+
+# kode -> (nama tampilan, file model)
+OILS = {
+    "mo": ("Mineral Oil", "model_mo.pkl"),
+    "neo": ("Natural Ester Oil", "model_neo.pkl"),
+    "seo": ("Synthetic Ester Oil", "model_seo.pkl"),
+}
+
 
 def pick_model(obj):
     if hasattr(obj, "predict"):
@@ -23,30 +29,41 @@ def pick_model(obj):
         for m in obj.values():
             if hasattr(m, "predict"):
                 return m
-    raise ValueError("Tidak ada model (objek dengan .predict) di model.pkl")
+    raise ValueError("No model (object with .predict) found in the pkl file")
 
-model = pick_model(bundle)
 
-def predict_bdv(temp, moist):
-  feats = {"temp": temp, "moisture": moist, "interaction": temp * moist}
+# Muat semua model saat start. File yang hilang/rusak dicatat, bukan mematikan app.
+MODELS = {}
+LOAD_ERRORS = {}
+for code, (label, filename) in OILS.items():
+    try:
+        with open(os.path.join(BASE_DIR, filename), "rb") as f:
+            MODELS[code] = pick_model(pickle.load(f))
+    except Exception as e:
+        LOAD_ERRORS[code] = f"Failed to load {filename}: {e}"
 
-  names = getattr(model, "feature_names_in_", None)
-  if names is not None:
-      cols = [str(c) for c in names]
-  else:
-      n = getattr(model, "n_features_in_", 2)
-      cols = ["temp", "moisture", "interaction"][:n]
 
-  missing = [c for c in cols if c not in feats]
-  if missing:
-      raise ValueError(f"Fitur tidak dikenal: {missing}")
+def predict_bdv(model, temp, moist):
+    feats = {"temp": temp, "moisture": moist, "interaction": temp * moist}
 
-  row = [feats[c] for c in cols]
-  X = pd.DataFrame([row], columns=cols) if names is not None else [row]
-  return float(model.predict(X)[0])
+    names = getattr(model, "feature_names_in_", None)
+    if names is not None:
+        cols = [str(c) for c in names]
+    else:
+        n = getattr(model, "n_features_in_", 2)
+        cols = ["temp", "moisture", "interaction"][:n]
+
+    missing = [c for c in cols if c not in feats]
+    if missing:
+        raise ValueError(f"Unknown features: {missing}")
+
+    row = [feats[c] for c in cols]
+    X = pd.DataFrame([row], columns=cols) if names is not None else [row]
+    return float(model.predict(X)[0])
+
 
 HTML_PAGE = """<!DOCTYPE html>
-<html lang="id">
+<html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -70,7 +87,7 @@ HTML_PAGE = """<!DOCTYPE html>
   .sub { margin:0 0 22px; color:var(--muted); font-size:.92rem; }
   label { display:block; font-size:.9rem; font-weight:500; margin-bottom:6px; }
   .field { margin-bottom:14px; }
-  input { width:100%; font:inherit; color:var(--ink); background:var(--bg);
+  input, select { width:100%; font:inherit; color:var(--ink); background:var(--bg);
           border:1px solid var(--line); border-radius:4px; padding:10px 12px; }
   button { width:100%; font:inherit; font-weight:600; color:#fff;
            background:var(--accent); border:0; border-radius:4px;
@@ -88,9 +105,17 @@ HTML_PAGE = """<!DOCTYPE html>
 <body>
 <main>
   <h1>Breakdown Voltage (BDV) Prediction</h1>
-  <p class="sub">Masukkan temperature dan moisture.</p>
+  <p class="sub">Select the oil type, then enter temperature and moisture.</p>
 
   <form method="post" action="/">
+    <div class="field">
+      <label for="oil">Oil Type</label>
+      <select id="oil" name="oil">
+        {% for code, label in oils %}
+        <option value="{{ code }}" {{ 'selected' if code == oil else '' }}>{{ label }}</option>
+        {% endfor %}
+      </select>
+    </div>
     <div class="field">
       <label for="temperature">Temperature (&deg;C)</label>
       <input id="temperature" name="temperature" type="number" step="any"
@@ -118,25 +143,43 @@ HTML_PAGE = """<!DOCTYPE html>
 
 @app.route("/", methods=["GET", "POST"])
 def index():
+    oil = "mo"
     temperature = moisture = bdv = error = ""
 
     if request.method == "POST":
+        oil = request.form.get("oil", "mo")
         temperature = request.form.get("temperature", "").strip()
         moisture = request.form.get("moisture", "").strip()
-        try:
-            temp = float(temperature)
-            moist = float(moisture)
-        except ValueError:
-            error = "Temperature and moisture must be numbers."
+
+        if oil not in OILS:
+            error = "Invalid oil type."
         else:
             try:
-                bdv = f"{predict_bdv(temp, moist):.2f}"
-            except Exception as e:
-                error = f"Prediction failed: {e}"
+                temp = float(temperature)
+                moist = float(moisture)
+            except ValueError:
+                error = "Temperature and moisture must be numbers."
+            else:
+                if oil not in MODELS:
+                    error = LOAD_ERRORS.get(oil, "Model is not available.")
+                else:
+                    try:
+                        bdv = f"{predict_bdv(MODELS[oil], temp, moist):.2f}"
+                    except Exception as e:
+                        error = f"Prediction failed: {e}"
 
     return render_template_string(
-        HTML_PAGE, temperature=temperature, moisture=moisture, bdv=bdv, error=error
+        HTML_PAGE,
+        oils=[(c, l) for c, (l, _) in OILS.items()],
+        oil=oil,
+        temperature=temperature,
+        moisture=moisture,
+        bdv=bdv,
+        error=error,
     )
 
+
 if __name__ == "__main__":
+    for msg in LOAD_ERRORS.values():
+        print("WARNING:", msg)
     app.run(host="0.0.0.0", port=5000, debug=False)
