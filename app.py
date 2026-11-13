@@ -7,7 +7,7 @@ from flask import Flask, render_template_string, request
 app = Flask(__name__)
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-with open(os.path.join(BASE_DIR, "svr-model.pkl"), "rb") as f:
+with open(os.path.join(BASE_DIR, "model.pkl"), "rb") as f:
     model_bundle = pickle.load(f)
 best_estimator = model_bundle["model"]
 
